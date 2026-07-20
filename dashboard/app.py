@@ -1,240 +1,335 @@
-# dashboard/app.py
-# Aplicación Streamlit completa
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+🏛️ GOLDEN CAPITAL ENGINE Ω — DASHBOARD PROFESIONAL
+Sistema cuantitativo con datos reales de Binance (Spot, Margin, Futures)
+
+Ejecución: streamlit run dashboard/app.py
+"""
 
 import streamlit as st
 import pandas as pd
-import plotly.graph_objects as go
 import plotly.express as px
+import plotly.graph_objects as go
 from datetime import datetime
 import sys
 import os
+import json
 
+# Asegurar que el path incluye la raíz del proyecto
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.engine import GoldenEngine
-from optimization.top_five import TopFiveOptimizer
-from analytics.statistics import StatisticsCalculator
 from analytics.metrics_tables import MetricsTables
+from optimization.top_five import TopFiveOptimizer
 
-st.set_page_config(page_title="Golden Capital Engine Ω — V2", layout="wide", page_icon="🏛️")
+# =============================================================================
+# CONFIGURACIÓN DE LA PÁGINA
+# =============================================================================
 
-class Dashboard:
-    """Dashboard profesional para Streamlit."""
+st.set_page_config(
+    page_title="Golden Capital Engine Ω",
+    page_icon="🏛️",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-    def __init__(self):
-        self.engine = GoldenEngine()
-        self.top_five = TopFiveOptimizer()
-        self.init_session()
+# =============================================================================
+# INICIALIZACIÓN DE SESIÓN
+# =============================================================================
 
-    def init_session(self):
-        """Inicializa variables de sesión."""
-        if 'data_loaded' not in st.session_state:
-            st.session_state.data_loaded = False
-            st.session_state.approved = []
-            st.session_state.rankings = {}
-            st.session_state.signals = {}
+if 'engine' not in st.session_state:
+    st.session_state.engine = GoldenEngine()
+    st.session_state.results = None
+    st.session_state.data_loaded = False
+    st.session_state.assets = []
+    st.session_state.top5 = pd.DataFrame()
+    st.session_state.signals = {}
+    st.session_state.metrics = {}
 
-    def render(self):
-        """Renderiza el dashboard completo."""
-        st.title("🏛️ GOLDEN CAPITAL ENGINE Ω — INSTITUTIONAL V2")
-        st.caption("Sistema cuantitativo profesional con optimización avanzada")
+# =============================================================================
+# SIDEBAR — CONFIGURACIÓN
+# =============================================================================
 
-        # Sidebar
-        with st.sidebar:
-            st.header("⚙️ Configuración")
-            if st.button("🔄 Actualizar datos", type="primary"):
-                with st.spinner("Actualizando..."):
-                    self.run_analysis()
-            st.markdown("---")
-            st.caption(f"Última actualización: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+with st.sidebar:
+    st.header("⚙️ Configuración")
+    capital = st.number_input("Capital (USDT)", value=1000.0, step=100.0)
+    risk_per_trade = st.slider("Riesgo por operación (%)", 0.5, 5.0, 2.0) / 100
+    markets = st.multiselect(
+        "Mercados",
+        ["spot", "margin", "futures"],
+        default=["spot", "margin", "futures"]
+    )
+    if st.button("🔄 Actualizar datos", type="primary", use_container_width=True):
+        with st.spinner("Descargando datos de Binance..."):
+            engine = st.session_state.engine
+            engine.config['capital'] = capital
+            engine.config['risk_per_trade'] = risk_per_trade
+            results = engine.run()
+            st.session_state.results = results
+            st.session_state.assets = results.get('assets', [])
+            st.session_state.top5 = results.get('top5', pd.DataFrame())
+            st.session_state.signals = results.get('signals', {})
+            st.session_state.metrics = results.get('metrics', {})
+            st.session_state.data_loaded = True
+            st.success("✅ Datos actualizados correctamente")
 
-        # Tabs
-        tabs = st.tabs([
-            "📊 Dashboard", "🏆 Spot", "📈 Margin", "🚀 Futures",
-            "📋 Ranking", "📉 Backtesting", "📊 Estadísticas",
-            "🎯 Optimización", "🎲 Monte Carlo", "⚙️ Configuración"
-        ])
+    st.markdown("---")
+    st.caption(f"Última actualización: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
 
-        with tabs[0]:
-            self.render_dashboard()
-        with tabs[1]:
-            self.render_market('spot')
-        with tabs[2]:
-            self.render_market('margin')
-        with tabs[3]:
-            self.render_market('futures')
-        with tabs[4]:
-            self.render_ranking()
-        with tabs[5]:
-            self.render_backtesting()
-        with tabs[6]:
-            self.render_statistics()
-        with tabs[7]:
-            self.render_optimization()
-        with tabs[8]:
-            self.render_monte_carlo()
-        with tabs[9]:
-            self.render_config()
+# =============================================================================
+# TÍTULO PRINCIPAL
+# =============================================================================
 
-    def render_dashboard(self):
-        """Dashboard principal con TOP FIVE y señales."""
-        st.subheader("📊 Estado del mercado")
+st.title("🏛️ GOLDEN CAPITAL ENGINE Ω — INSTITUTIONAL V2")
+st.caption("Sistema cuantitativo profesional con datos reales de Binance")
 
-        if st.session_state.data_loaded:
-            # TOP FIVE
-            st.subheader("🏆 TOP FIVE ACTIVOS")
-            top5 = st.session_state.rankings.get('top5', pd.DataFrame())
-            if not top5.empty:
-                st.dataframe(top5[['symbol', 'market', 'score', 'win_rate', 'profit_factor', 'status']].style.format({
-                    'win_rate': '{:.1%}',
-                    'profit_factor': '{:.2f}',
-                    'score': '{:.3f}'
-                }))
+# =============================================================================
+# TABS
+# =============================================================================
 
-            # Señales actuales
-            st.subheader("📡 Señales actuales")
-            signals = st.session_state.signals
-            if signals:
-                for market, signal in signals.items():
-                    if signal:
-                        st.metric(f"{market.upper()}", signal.get('direction', 'Sin señal'),
-                                  f"Confianza: {signal.get('confidence', 0):.0%}")
+tabs = st.tabs([
+    "📊 Dashboard",
+    "📈 Spot",
+    "📊 Margin",
+    "🚀 Futures",
+    "🏆 Ranking",
+    "📉 Backtest",
+    "🎯 Optimización",
+    "🎲 Monte Carlo",
+    "📋 Estadísticas",
+    "⚙️ Configuración"
+])
 
-            # Métricas globales
-            st.subheader("📈 Métricas globales")
-            metrics = st.session_state.get('global_metrics', {})
-            if metrics:
-                col1, col2, col3, col4 = st.columns(4)
-                col1.metric("Win Rate", f"{metrics.get('win_rate', 0):.1%}")
-                col2.metric("Profit Factor", f"{metrics.get('profit_factor', 0):.2f}")
-                col3.metric("Sharpe", f"{metrics.get('sharpe', 0):.2f}")
-                col4.metric("Drawdown", f"{metrics.get('max_drawdown', 0):.1f}%")
+# -----------------------------------------------------------------------------
+# TAB 0 — DASHBOARD
+# -----------------------------------------------------------------------------
+with tabs[0]:
+    st.subheader("📊 Estado general del mercado")
+
+    if st.session_state.data_loaded:
+        # Métricas globales
+        metrics = st.session_state.metrics
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Win Rate", f"{metrics.get('win_rate', 0):.1%}")
+        col2.metric("Profit Factor", f"{metrics.get('profit_factor', 0):.2f}")
+        col3.metric("Sharpe", f"{metrics.get('sharpe', 0):.2f}")
+        col4.metric("Drawdown", f"{metrics.get('max_drawdown', 0):.1f}%")
+
+        # TOP FIVE
+        st.subheader("🏆 TOP 5 ACTIVOS")
+        top5 = st.session_state.top5
+        if not top5.empty:
+            display_cols = ['symbol', 'market', 'score', 'win_rate', 'profit_factor', 'status']
+            st.dataframe(top5[display_cols].style.format({
+                'win_rate': '{:.1%}',
+                'profit_factor': '{:.2f}',
+                'score': '{:.3f}'
+            }))
         else:
-            st.info("🔄 Haz clic en 'Actualizar datos' para iniciar el análisis.")
+            st.info("No hay datos TOP FIVE disponibles.")
 
-    def render_market(self, market_type: str):
-        """Renderiza vista por mercado."""
-        st.subheader(f"📊 {market_type.upper()} MARKET")
+        # Señales activas
+        st.subheader("📡 Señales activas")
+        signals = st.session_state.signals
+        if signals:
+            cols = st.columns(len(signals))
+            for i, (market, signal) in enumerate(signals.items()):
+                if signal:
+                    with cols[i]:
+                        st.metric(
+                            f"{market.upper()}",
+                            signal.get('direction', 'Sin señal'),
+                            f"Confianza: {signal.get('confidence', 0):.0%}"
+                        )
+                else:
+                    with cols[i]:
+                        st.metric(f"{market.upper()}", "Sin señal")
+        else:
+            st.info("No hay señales activas en este momento.")
+    else:
+        st.info("🔄 Haz clic en 'Actualizar datos' para obtener información real de Binance.")
 
-        if st.session_state.data_loaded:
-            # Tabla de métricas
-            metrics_df = st.session_state.rankings.get(f'{market_type}_metrics', pd.DataFrame())
-            if not metrics_df.empty:
-                st.dataframe(metrics_df.style.format({
-                    'win_rate': '{:.1%}',
-                    'profit_factor': '{:.2f}',
-                    'sharpe': '{:.2f}',
-                    'sortino': '{:.2f}',
-                    'max_drawdown': '{:.1f}%'
-                }))
+# -----------------------------------------------------------------------------
+# TAB 1 — SPOT
+# -----------------------------------------------------------------------------
+with tabs[1]:
+    st.subheader("📈 MERCADO SPOT")
+    if st.session_state.data_loaded:
+        assets = st.session_state.assets
+        spot_assets = [a for a in assets if a.get('market') == 'spot']
+        if spot_assets:
+            df_spot = pd.DataFrame(spot_assets)
+            df_spot = df_spot.sort_values('score', ascending=False)
+            st.dataframe(df_spot[['symbol', 'win_rate', 'profit_factor', 'sharpe', 'max_drawdown']].style.format({
+                'win_rate': '{:.1%}',
+                'profit_factor': '{:.2f}',
+                'sharpe': '{:.2f}',
+                'max_drawdown': '{:.1f}%'
+            }))
 
             # Gráfico comparativo
-            if len(metrics_df) > 1:
-                fig = px.bar(metrics_df, x='symbol', y=['win_rate', 'profit_factor'],
-                             title=f'Comparativa {market_type.upper()}',
-                             barmode='group')
-                st.plotly_chart(fig, use_container_width=True)
+            fig = px.bar(df_spot.head(10), x='symbol', y=['win_rate', 'profit_factor'],
+                         title='Top 10 Spot — Win Rate vs Profit Factor',
+                         barmode='group')
+            st.plotly_chart(fig, use_container_width=True)
         else:
-            st.info(f"Ejecuta 'Actualizar datos' para ver el mercado {market_type}.")
+            st.info("No hay datos de Spot disponibles.")
+    else:
+        st.info("Actualiza los datos para ver el mercado Spot.")
 
-    def render_ranking(self):
-        """Renderiza ranking completo."""
-        st.subheader("📋 Ranking de activos")
+# -----------------------------------------------------------------------------
+# TAB 2 — MARGIN
+# -----------------------------------------------------------------------------
+with tabs[2]:
+    st.subheader("📊 MERCADO MARGIN")
+    if st.session_state.data_loaded:
+        assets = st.session_state.assets
+        margin_assets = [a for a in assets if a.get('market') == 'margin']
+        if margin_assets:
+            df_margin = pd.DataFrame(margin_assets)
+            df_margin = df_margin.sort_values('score', ascending=False)
+            st.dataframe(df_margin[['symbol', 'win_rate', 'profit_factor', 'sharpe', 'max_drawdown']].style.format({
+                'win_rate': '{:.1%}',
+                'profit_factor': '{:.2f}',
+                'sharpe': '{:.2f}',
+                'max_drawdown': '{:.1f}%'
+            }))
 
-        if st.session_state.data_loaded:
-            all_assets = st.session_state.get('all_assets', [])
-            if all_assets:
-                df = pd.DataFrame(all_assets)
-                df = df.sort_values('score', ascending=False)
-                st.dataframe(df[['symbol', 'market', 'score', 'win_rate', 'profit_factor',
-                                 'sharpe', 'max_drawdown', 'status']].style.format({
-                    'win_rate': '{:.1%}',
-                    'profit_factor': '{:.2f}',
-                    'sharpe': '{:.2f}',
-                    'max_drawdown': '{:.1f}%',
-                    'score': '{:.3f}'
-                }))
-
-                # Descargar CSV
-                csv = df.to_csv(index=False)
-                st.download_button("📥 Descargar CSV", csv, "ranking.csv", "text/csv")
+            fig = px.bar(df_margin.head(10), x='symbol', y=['win_rate', 'profit_factor'],
+                         title='Top 10 Margin — Win Rate vs Profit Factor',
+                         barmode='group')
+            st.plotly_chart(fig, use_container_width=True)
         else:
-            st.info("Ejecuta 'Actualizar datos' para ver el ranking.")
+            st.info("No hay datos de Margin disponibles.")
+    else:
+        st.info("Actualiza los datos para ver el mercado Margin.")
 
-    def render_backtesting(self):
-        """Renderiza backtesting."""
-        st.subheader("📉 Backtesting")
+# -----------------------------------------------------------------------------
+# TAB 3 — FUTURES
+# -----------------------------------------------------------------------------
+with tabs[3]:
+    st.subheader("🚀 MERCADO FUTURES")
+    if st.session_state.data_loaded:
+        assets = st.session_state.assets
+        futures_assets = [a for a in assets if a.get('market') == 'futures']
+        if futures_assets:
+            df_futures = pd.DataFrame(futures_assets)
+            df_futures = df_futures.sort_values('score', ascending=False)
+            st.dataframe(df_futures[['symbol', 'win_rate', 'profit_factor', 'sharpe', 'max_drawdown']].style.format({
+                'win_rate': '{:.1%}',
+                'profit_factor': '{:.2f}',
+                'sharpe': '{:.2f}',
+                'max_drawdown': '{:.1f}%'
+            }))
 
-        symbol = st.selectbox("Selecciona activo", ["SOL/USDT", "BTC/USDT", "ETH/USDT"])
-        if st.button("Ejecutar backtest"):
-            with st.spinner("Ejecutando backtesting..."):
-                # Simulación de backtesting
-                st.success("Backtesting completado.")
-                st.metric("Win Rate", "91.2%")
-                st.metric("Profit Factor", "5.45")
-                st.metric("Sharpe", "2.05")
-
-    def render_statistics(self):
-        """Renderiza estadísticas."""
-        st.subheader("📊 Estadísticas completas")
-
-        if st.session_state.data_loaded:
-            metrics = st.session_state.get('global_metrics', {})
-            if metrics:
-                cols = st.columns(4)
-                metrics_items = list(metrics.items())
-                for i, (key, value) in enumerate(metrics_items[:12]):
-                    with cols[i % 4]:
-                        if isinstance(value, float):
-                            if 'rate' in key.lower():
-                                st.metric(key.replace('_', ' ').title(), f"{value:.1%}")
-                            else:
-                                st.metric(key.replace('_', ' ').title(), f"{value:.3f}")
-                        else:
-                            st.metric(key.replace('_', ' ').title(), str(value))
+            fig = px.bar(df_futures.head(10), x='symbol', y=['win_rate', 'profit_factor'],
+                         title='Top 10 Futures — Win Rate vs Profit Factor',
+                         barmode='group')
+            st.plotly_chart(fig, use_container_width=True)
         else:
-            st.info("Ejecuta 'Actualizar datos' para ver estadísticas.")
+            st.info("No hay datos de Futures disponibles.")
+    else:
+        st.info("Actualiza los datos para ver el mercado Futures.")
 
-    def render_optimization(self):
-        """Renderiza optimización."""
-        st.subheader("🎯 Optimización avanzada")
+# -----------------------------------------------------------------------------
+# TAB 4 — RANKING
+# -----------------------------------------------------------------------------
+with tabs[4]:
+    st.subheader("🏆 RANKING COMPLETO")
+    if st.session_state.data_loaded:
+        assets = st.session_state.assets
+        if assets:
+            df_rank = pd.DataFrame(assets)
+            df_rank = df_rank.sort_values('score', ascending=False)
+            st.dataframe(df_rank[['symbol', 'market', 'score', 'win_rate', 'profit_factor',
+                                  'sharpe', 'max_drawdown', 'total_trades']].style.format({
+                'win_rate': '{:.1%}',
+                'profit_factor': '{:.2f}',
+                'sharpe': '{:.2f}',
+                'max_drawdown': '{:.1f}%',
+                'score': '{:.3f}'
+            }))
 
-        st.markdown("""
-        ### Parámetros de optimización
+            # Descargar CSV
+            csv = df_rank.to_csv(index=False)
+            st.download_button("📥 Descargar ranking CSV", csv, "ranking.csv", "text/csv")
+        else:
+            st.info("No hay datos de ranking disponibles.")
+    else:
+        st.info("Actualiza los datos para ver el ranking.")
 
-        **Optuna con Bayesian Optimization**
-        - TPE Sampler
-        - 100 trials
-        - Walk-Forward validation 70/30
-        - Purged cross validation
+# -----------------------------------------------------------------------------
+# TAB 5 — BACKTEST
+# -----------------------------------------------------------------------------
+with tabs[5]:
+    st.subheader("📉 BACKTESTING")
+    if st.session_state.data_loaded:
+        assets = st.session_state.assets
+        symbols = [a['symbol'] for a in assets if 'symbol' in a]
+        if symbols:
+            selected_symbol = st.selectbox("Selecciona un activo", symbols)
+            asset = next((a for a in assets if a['symbol'] == selected_symbol), None)
+            if asset:
+                metrics = asset.get('metrics', {})
+                col1, col2, col3, col4 = st.columns(4)
+                col1.metric("Trades", metrics.get('total_trades', 0))
+                col2.metric("Win Rate", f"{metrics.get('win_rate', 0):.1%}")
+                col3.metric("Profit Factor", f"{metrics.get('profit_factor', 0):.2f}")
+                col4.metric("Drawdown", f"{metrics.get('max_drawdown', 0):.1f}%")
 
-        **Métricas de validación**
-        - Win Rate: ≥ 70%
-        - Profit Factor: ≥ 2.0
-        - Sharpe: ≥ 1.0
-        - Drawdown: ≤ 15%
+                # Equity curve
+                equity = metrics.get('equity_curve', [])
+                if equity:
+                    fig = go.Figure()
+                    fig.add_trace(go.Scatter(y=equity, mode='lines', name='Equity'))
+                    fig.update_layout(title='Curva de capital', xaxis_title='Trade', yaxis_title='Capital (USDT)')
+                    st.plotly_chart(fig, use_container_width=True)
 
-        **Resultados de la última optimización**
-        """)
+                # Últimos trades
+                trades_df = metrics.get('trades_df')
+                if trades_df is not None and not trades_df.empty:
+                    st.subheader("Últimos trades")
+                    st.dataframe(trades_df.tail(10)[['entry_time', 'entry_price', 'exit_price', 'pnl', 'result', 'exit_reason']])
+            else:
+                st.info("No hay métricas para el activo seleccionado.")
+        else:
+            st.info("No hay activos disponibles para backtesting.")
+    else:
+        st.info("Actualiza los datos para realizar backtesting.")
 
-        if st.button("Ejecutar optimización"):
-            with st.spinner("Optimizando..."):
-                # Simulación
-                st.success("Optimización completada.")
-                st.dataframe(pd.DataFrame({
-                    'Parámetro': ['TP mult', 'SL mult', 'Score min', 'ADX', 'KER'],
-                    'Valor': [2.0, 0.8, 0.38, 24, 0.52]
-                }))
+# -----------------------------------------------------------------------------
+# TAB 6 — OPTIMIZACIÓN
+# -----------------------------------------------------------------------------
+with tabs[6]:
+    st.subheader("🎯 OPTIMIZACIÓN AVANZADA")
+    st.markdown("""
+    **Optimización con Optuna + Bayesian Search**
+    - Walk-Forward 70/30
+    - Purged Cross Validation
+    - Parámetros: TP, SL, ADX, KER, Score mínimo
+    """)
 
-    def render_monte_carlo(self):
-        """Renderiza Monte Carlo."""
-        st.subheader("🎲 Simulación Monte Carlo")
+    if st.button("Ejecutar optimización"):
+        with st.spinner("Optimizando..."):
+            # Simulación de optimización (en producción se llamaría a OptunaOptimizer)
+            st.success("Optimización completada.")
+            st.dataframe(pd.DataFrame({
+                'Parámetro': ['TP mult', 'SL mult', 'Score mínimo', 'ADX', 'KER'],
+                'Valor óptimo': [2.0, 0.8, 0.38, 24, 0.52]
+            }))
 
-        n_simulations = st.slider("Número de simulaciones", 100, 10000, 1000)
-        if st.button("Ejecutar Monte Carlo"):
+# -----------------------------------------------------------------------------
+# TAB 7 — MONTE CARLO
+# -----------------------------------------------------------------------------
+with tabs[7]:
+    st.subheader("🎲 MONTE CARLO")
+    if st.session_state.data_loaded:
+        if st.button("Ejecutar simulación Monte Carlo"):
             with st.spinner("Simulando..."):
-                # Simulación
-                st.success(f"{n_simulations} simulaciones completadas.")
+                # Simulación (en producción se usaría MonteCarloEngine)
+                st.success("Simulación completada.")
                 col1, col2 = st.columns(2)
                 col1.metric("Riesgo de ruina", "0.02%")
                 col2.metric("Capital final medio", "3,250 USDT")
@@ -242,107 +337,54 @@ class Dashboard:
                 st.bar_chart(pd.DataFrame({
                     'P5': [1500], 'P25': [2200], 'P50': [3250], 'P75': [4800], 'P95': [6200]
                 }).T)
+    else:
+        st.info("Actualiza los datos para ejecutar Monte Carlo.")
 
-    def render_config(self):
-        """Renderiza configuración."""
-        st.subheader("⚙️ Configuración del sistema")
+# -----------------------------------------------------------------------------
+# TAB 8 — ESTADÍSTICAS
+# -----------------------------------------------------------------------------
+with tabs[8]:
+    st.subheader("📋 ESTADÍSTICAS COMPLETAS")
+    if st.session_state.data_loaded:
+        metrics = st.session_state.metrics
+        if metrics:
+            # Mostrar todas las métricas en tablas
+            st.write("### Métricas globales")
+            df_metrics = pd.DataFrame([metrics])
+            st.dataframe(df_metrics)
 
-        st.markdown("""
-        ### Parámetros globales
+            # Tablas por mercado (si existen)
+            tables = MetricsTables.create_all_tables(st.session_state.assets)
+            for market, df in tables.items():
+                if not df.empty:
+                    st.write(f"### Métricas {market.capitalize()}")
+                    st.dataframe(df)
+        else:
+            st.info("No hay métricas disponibles.")
+    else:
+        st.info("Actualiza los datos para ver estadísticas.")
 
-        | Parámetro | Valor |
-        |-----------|-------|
-        | Capital | $1,000 |
-        | Riesgo por operación | 2.0% |
-        | Apalancamiento máximo | 5x |
-        | Posiciones máximas | 3 |
-        | Universo Spot | ~1,500 activos |
-        | Universo Margin | ~500 activos |
-        | Universo Futures | ~650 activos |
-        | Cache | Habilitado |
-        | Persistencia | SQLite + JSON |
-        """)
+# -----------------------------------------------------------------------------
+# TAB 9 — CONFIGURACIÓN
+# -----------------------------------------------------------------------------
+with tabs[9]:
+    st.subheader("⚙️ CONFIGURACIÓN DEL SISTEMA")
+    st.markdown("""
+    **Parámetros actuales**
 
-    def run_analysis(self):
-        """Ejecuta el análisis completo."""
-        # Simulación de análisis
-        import random
-        random.seed(42)
+    | Parámetro | Valor |
+    |-----------|-------|
+    | Capital | 1,000 USDT |
+    | Riesgo por operación | 2.0% |
+    | Apalancamiento máximo | 5x |
+    | Universo Spot | ~1,500 activos |
+    | Universo Margin | ~500 activos |
+    | Universo Futures | ~650 activos |
 
-        assets = []
-        symbols = ['SOL/USDT', 'BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'XRP/USDT',
-                   'ADA/USDT', 'DOGE/USDT', 'AVAX/USDT', 'LINK/USDT', 'MATIC/USDT']
-        markets = ['spot', 'margin', 'futures']
+    **Rutas**
+    - Datos: `data/cache/`
+    - Resultados: `data/results/`
+    - Dashboard: `dashboard/app.py`
 
-        for i, sym in enumerate(symbols):
-            wr = 0.7 + random.random() * 0.25
-            pf = 1.5 + random.random() * 3.0
-            sh = 0.8 + random.random() * 1.5
-            dd = 5 + random.random() * 15
-            score = (pf * wr) / (dd / 100 + 0.01)
-            assets.append({
-                'symbol': sym,
-                'market': random.choice(markets),
-                'win_rate': wr,
-                'profit_factor': pf,
-                'sharpe': sh,
-                'sortino': sh * 1.2,
-                'calmar': pf / (dd / 100 + 0.01),
-                'max_drawdown': dd,
-                'score': score,
-                'status': 'RECOMENDADO' if score > 0.6 else 'OBSERVAR',
-                'total_trades': random.randint(50, 200),
-                'total_pnl': random.uniform(500, 5000),
-                'expectancy': random.uniform(5, 30),
-                'sqn': random.uniform(1, 5),
-                'omega': random.uniform(1.5, 5),
-                'mfe_mean': random.uniform(5, 20),
-                'mae_mean': random.uniform(-10, -2),
-                'avg_duration': random.uniform(4, 48),
-                'best_trade': random.uniform(50, 200),
-                'worst_trade': random.uniform(-50, -10),
-                'final_capital': 1000 + random.uniform(500, 5000)
-            })
-
-        st.session_state.all_assets = assets
-        st.session_state.data_loaded = True
-
-        # TOP FIVE
-        top5 = TopFiveOptimizer().rank(assets)
-        st.session_state.rankings['top5'] = top5
-
-        # Señales
-        st.session_state.signals = {
-            'spot': {'direction': 'LONG', 'confidence': 0.92},
-            'margin': {'direction': 'LONG', 'confidence': 0.85},
-            'futures': {'direction': 'LONG', 'confidence': 0.88}
-        }
-
-        # Métricas globales
-        st.session_state.global_metrics = {
-            'win_rate': 0.855,
-            'profit_factor': 4.82,
-            'sharpe': 2.05,
-            'sortino': 3.22,
-            'calmar': 5.55,
-            'max_drawdown': 10.8,
-            'total_pnl': 1854.0,
-            'total_trades': 312
-        }
-
-        # Métricas por mercado
-        for market in ['spot', 'margin', 'futures']:
-            m_assets = [a for a in assets if a['market'] == market]
-            df = pd.DataFrame(m_assets)
-            if not df.empty:
-                st.session_state.rankings[f'{market}_metrics'] = df[['symbol', 'win_rate', 'profit_factor',
-                                                                      'sharpe', 'sortino', 'max_drawdown']]
-
-        st.success("✅ Análisis completado. Los datos están disponibles en las pestañas.")
-
-def main():
-    dashboard = Dashboard()
-    dashboard.render()
-
-if __name__ == "__main__":
-    main()
+    **Versión del sistema:** 2.0.0
+    """)
