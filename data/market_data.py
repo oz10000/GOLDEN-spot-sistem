@@ -1,5 +1,6 @@
 # data/market_data.py
-# Gestión de datos de mercado
+# Gestión de datos de mercado con caché y descarga desde Binance
+# MODIFICADO: días históricos aumentados a 200 para indicadores de largo plazo
 
 import ccxt
 import pandas as pd
@@ -8,12 +9,9 @@ import pickle
 import hashlib
 import time
 from datetime import datetime, timedelta
-from typing import Optional, List, Tuple
 
 class MarketData:
-    """Gestión de datos de mercado con caché."""
-
-    def __init__(self, cache_dir: str = "data/cache"):
+    def __init__(self, cache_dir="data/cache"):
         self.cache_dir = cache_dir
         os.makedirs(cache_dir, exist_ok=True)
         self.exchanges = self._init_exchanges()
@@ -22,10 +20,9 @@ class MarketData:
         exchanges = {}
         for market in ['spot', 'margin', 'future', 'swap']:
             try:
-                default_type = 'spot' if market == 'margin' else market
                 ex = getattr(ccxt, 'binance')({
                     'enableRateLimit': True,
-                    'options': {'defaultType': default_type}
+                    'options': {'defaultType': 'spot' if market == 'margin' else market}
                 })
                 ex.load_markets()
                 exchanges[market] = ex
@@ -33,8 +30,7 @@ class MarketData:
                 exchanges[market] = None
         return exchanges
 
-    def get_symbols(self, market: str) -> List[str]:
-        """Retorna símbolos disponibles."""
+    def get_symbols(self, market):
         ex = self.exchanges.get(market)
         if not ex:
             return []
@@ -48,9 +44,13 @@ class MarketData:
         except:
             return []
 
-    def get_historical(self, symbol: str, market: str = 'spot',
-                       timeframe: str = '1h', days: int = 730) -> Optional[pd.DataFrame]:
-        """Obtiene datos históricos con caché."""
+    def get_historical(self, symbol, market='spot', timeframe='1h', days=200):
+        """
+        Descarga datos históricos con caché.
+        MODIFICADO: días por defecto cambiados de 30 a 200.
+        """
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=days)
         cache_key = hashlib.md5(f"{market}_{symbol}_{timeframe}_{days}".encode()).hexdigest()
         cache_path = os.path.join(self.cache_dir, f"{cache_key}.pkl")
 
@@ -65,11 +65,8 @@ class MarketData:
         if not ex:
             return None
 
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=days)
         since = int(start_date.timestamp() * 1000)
         all_data = []
-
         while True:
             try:
                 ohlcv = ex.fetch_ohlcv(symbol, timeframe, since=since, limit=1000)
