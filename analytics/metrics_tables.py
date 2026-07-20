@@ -3,7 +3,6 @@
 
 import pandas as pd
 from typing import Dict, List
-from .statistics import StatisticsCalculator
 
 class MetricsTables:
     """Genera tablas de métricas separadas por mercado."""
@@ -38,3 +37,16 @@ class MetricsTables:
             'margin': MetricsTables.create_table(asset_metrics, 'margin'),
             'futures': MetricsTables.create_table(asset_metrics, 'futures'),
         }
+
+    @staticmethod
+    def generate_csv(asset_metrics: List[Dict], output_dir: str = "data/results"):
+        """Genera archivos CSV separados por mercado."""
+        import os
+        os.makedirs(output_dir, exist_ok=True)
+
+        tables = MetricsTables.create_all_tables(asset_metrics)
+        for market, df in tables.items():
+            if not df.empty:
+                df.to_csv(f"{output_dir}/metrics_{market}.csv", index=False)
+
+        return tables
