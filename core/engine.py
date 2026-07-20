@@ -1,5 +1,5 @@
 # core/engine.py
-# Motor principal del sistema — REFACTORIZADO con datos reales
+# Motor principal del Golden Capital Engine Ω — CORREGIDO (sin límite de activos)
 
 import pandas as pd
 import json
@@ -49,13 +49,19 @@ class GoldenEngine:
         for market in markets:
             symbols = self.market_data.get_symbols(market)
             if max_assets is not None:
-                symbols = symbols[:max_assets]
+                symbols = symbols[:max_assets]  # Para pruebas
             logger.info(f"Escaneando {market}: {len(symbols)} activos")
+
+            filtered_count = 0
+            signal_count = 0
+            no_data_count = 0
+            no_signal_count = 0
 
             for symbol in symbols:
                 try:
                     df = self.market_data.get_historical(symbol, market)
                     if df is None or len(df) < 100:
+                        no_data_count += 1
                         continue
 
                     strategy = self.strategies.get(market)
@@ -64,8 +70,10 @@ class GoldenEngine:
 
                     signal = strategy.generate_signal(df)
                     if not signal:
+                        no_signal_count += 1
                         continue
 
+                    signal_count += 1
                     # Backtesting real con datos históricos
                     bt = Backtester(df, self.config)
                     metrics = bt.run(signal)
@@ -88,6 +96,9 @@ class GoldenEngine:
                 except Exception as e:
                     logger.debug(f"Error con {symbol}: {e}")
                     continue
+
+            logger.info(f"{market}: {signal_count} señales de {len(symbols)} activos "
+                       f"(sin datos: {no_data_count}, sin señal: {no_signal_count})")
 
         return all_results
 
