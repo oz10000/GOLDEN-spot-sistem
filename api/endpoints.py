@@ -2,7 +2,7 @@
 # API pública de métricas en formato JSON
 
 import json
-import pandas as pd
+import os
 from typing import Dict, Any
 
 class MetricsAPI:
@@ -11,39 +11,35 @@ class MetricsAPI:
     def __init__(self, data_path: str = "data/results/"):
         self.data_path = data_path
 
+    def _load_json(self, filename: str) -> Dict:
+        """Carga un archivo JSON."""
+        path = os.path.join(self.data_path, filename)
+        if os.path.exists(path):
+            with open(path, 'r') as f:
+                return json.load(f)
+        return {"error": "No hay datos disponibles"}
+
     def get_top_five(self) -> Dict[str, Any]:
         """Retorna los 5 mejores activos."""
-        try:
-            with open(f"{self.data_path}/top_five.json", 'r') as f:
-                return json.load(f)
-        except:
-            return {"error": "No hay datos disponibles"}
+        return self._load_json("top_five.json")
 
-    def get_current_signals(self) -> Dict[str, Any]:
+    def get_signals(self) -> Dict[str, Any]:
         """Retorna señales actuales."""
-        try:
-            with open(f"{self.data_path}/signals.json", 'r') as f:
-                return json.load(f)
-        except:
-            return {"error": "No hay señales disponibles"}
-
-    def get_metrics(self, symbol: str = None) -> Dict[str, Any]:
-        """Retorna métricas de un activo o de todos."""
-        try:
-            df = pd.read_csv(f"{self.data_path}/metrics.csv")
-            if symbol:
-                df = df[df['symbol'] == symbol]
-            return df.to_dict('records')
-        except:
-            return {"error": "No hay métricas disponibles"}
+        return self._load_json("signals.json")
 
     def get_ranking(self) -> Dict[str, Any]:
         """Retorna ranking completo."""
-        try:
-            with open(f"{self.data_path}/ranking.json", 'r') as f:
-                return json.load(f)
-        except:
-            return {"error": "No hay ranking disponible"}
+        return self._load_json("ranking.json")
+
+    def get_metrics(self, market: str = None) -> Dict[str, Any]:
+        """Retorna métricas de un mercado específico."""
+        if market:
+            return self._load_json(f"metrics_{market}.json")
+        return {
+            'spot': self._load_json("metrics_spot.json"),
+            'margin': self._load_json("metrics_margin.json"),
+            'futures': self._load_json("metrics_futures.json")
+        }
 
     def to_json(self, data: Dict) -> str:
         """Convierte a JSON."""
