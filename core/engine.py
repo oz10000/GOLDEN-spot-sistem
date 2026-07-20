@@ -1,11 +1,11 @@
 # core/engine.py
-# Motor principal del Golden Capital Engine Ω — CORREGIDO (sin límite de activos)
+# Motor principal del Golden Capital Engine Ω — CORREGIDO Y EXTENDIDO
 
 import pandas as pd
 import json
 import os
 import logging
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 from datetime import datetime
 
 from strategies.spot_strategy import SpotStrategy
@@ -18,6 +18,7 @@ from data.market_data import MarketData
 from core.backtester import Backtester
 
 logger = logging.getLogger(__name__)
+
 
 class GoldenEngine:
     """Motor principal del Golden Capital Engine Ω."""
@@ -49,13 +50,12 @@ class GoldenEngine:
         for market in markets:
             symbols = self.market_data.get_symbols(market)
             if max_assets is not None:
-                symbols = symbols[:max_assets]  # Para pruebas
+                symbols = symbols[:max_assets]
             logger.info(f"Escaneando {market}: {len(symbols)} activos")
 
-            filtered_count = 0
-            signal_count = 0
             no_data_count = 0
             no_signal_count = 0
+            signal_count = 0
 
             for symbol in symbols:
                 try:
@@ -83,7 +83,7 @@ class GoldenEngine:
                         'market': market,
                         'signal': signal,
                         'metrics': metrics,
-                        'score': signal.get('confidence', 0) * metrics.get('profit_factor', 1.0),
+                        'score': signal.get('confidence', 0) * max(metrics.get('profit_factor', 1.0), 0.1),
                         'win_rate': metrics.get('win_rate', 0),
                         'profit_factor': metrics.get('profit_factor', 0),
                         'sharpe': metrics.get('sharpe', 0),
@@ -178,3 +178,48 @@ class GoldenEngine:
         self.save_results(assets, top5)
 
         return self.results
+
+    # ======================================================================
+    # NUEVOS MÉTODOS PARA VALIDACIÓN Y DIAGNÓSTICO
+    # ======================================================================
+
+    def get_historical_signals(self, markets: List[str] = ['spot', 'margin', 'futures'],
+                               max_assets: int = 100) -> pd.DataFrame:
+        """Busca señales históricas en los últimos 7 días."""
+        from analytics.historical_signals import HistoricalSignalFinder
+        finder = HistoricalSignalFinder(days_back=7)
+        df = finder.scan(markets, max_assets)
+        return df
+
+    def get_top_assets(self, markets: List[str] = ['spot', 'margin', 'futures'],
+                       max_assets: int = 200) -> pd.DataFrame:
+        """Genera ranking de activos por calidad."""
+        from optimization.top_assets import TopAssetsRanker
+        ranker = TopAssetsRanker()
+        df = ranker.rank(markets, max_assets)
+        return df
+
+    def get_diagnostic_stats(self) -> Dict:
+        """Retorna estadísticas de diagnóstico del último escaneo."""
+        if not self.results:
+            return {'error': 'No hay resultados de escaneo'}
+
+        assets = self.results.get('assets', [])
+        total = len(assets)
+        with_signal = len([a for a in assets if a.get('signal')])
+
+        by_market = {}
+        for market in ['spot', 'margin', 'futures']:
+            m_assets = [a for a in assets if a.get('market') == market]
+            m_signals = [a for a in m_assets if a.get('signal')]
+            by_market[market] = {
+                'total': len(m_assets),
+                'signals': len(m_signals)
+            }
+
+        return {
+            'total_assets': total,
+            'signals_found': with_signal,
+            'by_market': by_market,
+            'timestamp': self.results.get('timestamp', datetime.now().isoformat())
+        }
