@@ -50,6 +50,8 @@ if 'engine' not in st.session_state:
     st.session_state.metrics = {}
     st.session_state.top_assets = pd.DataFrame()
     st.session_state.historical_signals = pd.DataFrame()
+    st.session_state.market_ranking = pd.DataFrame()
+    st.session_state.multi_tf_ranking = {}
 
 # =============================================================================
 # SIDEBAR — CONFIGURACIÓN
@@ -84,7 +86,7 @@ with st.sidebar:
     with col2:
         if st.button("🔍 Diagnóstico rápido", use_container_width=True):
             engine = st.session_state.engine
-            stats = engine.get_diagnostic_stats()
+            stats = engine.get_detailed_diagnostic()
             st.json(stats)
 
     st.markdown("---")
@@ -98,7 +100,7 @@ st.title("🏛️ GOLDEN CAPITAL ENGINE Ω — INSTITUTIONAL V2")
 st.caption("Sistema cuantitativo profesional con datos reales de Binance")
 
 # =============================================================================
-# TABS
+# TABS (14 pestañas)
 # =============================================================================
 
 tabs = st.tabs([
@@ -114,7 +116,8 @@ tabs = st.tabs([
     "⚙️ Configuración",
     "🏅 Top Ten",
     "📚 Señales Históricas",
-    "🔍 Diagnóstico"
+    "🔍 Diagnóstico",
+    "📊 Market Radar"
 ])
 
 # -----------------------------------------------------------------------------
@@ -394,7 +397,7 @@ with tabs[9]:
     """)
 
 # -----------------------------------------------------------------------------
-# TAB 10 — TOP TEN (NUEVO)
+# TAB 10 — TOP TEN
 # -----------------------------------------------------------------------------
 with tabs[10]:
     st.subheader("🏅 TOP TEN ACTIVOS POR CALIDAD")
@@ -422,7 +425,7 @@ with tabs[10]:
         st.info("Haz clic en 'Generar Top Ten' para obtener el ranking.")
 
 # -----------------------------------------------------------------------------
-# TAB 11 — SEÑALES HISTÓRICAS (NUEVO)
+# TAB 11 — SEÑALES HISTÓRICAS
 # -----------------------------------------------------------------------------
 with tabs[11]:
     st.subheader("📚 SEÑALES HISTÓRICAS (Últimos 7 días)")
@@ -446,7 +449,6 @@ with tabs[11]:
         if not df_hist.empty:
             st.success(f"Se encontraron {len(df_hist)} señales históricas")
 
-            # Resumen
             summary = st.session_state.get('hist_summary', {})
             if summary:
                 col1, col2, col3, col4 = st.columns(4)
@@ -455,17 +457,14 @@ with tabs[11]:
                 col3.metric("Profit Factor", f"{summary.get('profit_factor', 0):.2f}")
                 col4.metric("Score medio", f"{summary.get('avg_score', 0):.2f}")
 
-            # Tabla
             st.dataframe(df_hist[['symbol', 'market', 'direction', 'timestamp_signal',
                                   'entry_price', 'exit_price', 'result', 'profit_loss',
                                   'confidence', 'score']])
 
-            # Top 10 por score
             top = df_hist.sort_values('score', ascending=False).head(10)
             st.write("**Top 10 señales por score**")
             st.dataframe(top[['symbol', 'market', 'direction', 'score', 'profit_loss']])
 
-            # Descargar CSV
             csv = df_hist.to_csv(index=False)
             st.download_button("📥 Descargar CSV", csv, "historical_signals.csv", "text/csv")
         else:
@@ -477,43 +476,155 @@ with tabs[11]:
 with tabs[12]:
     st.subheader("🔍 DIAGNÓSTICO DEL SISTEMA")
 
-    if st.session_state.data_loaded:
-        assets = st.session_state.assets
-        engine = st.session_state.engine
-        stats = engine.get_diagnostic_stats()
+    if st.button("🔄 Actualizar diagnóstico"):
+        with st.spinner("Generando diagnóstico..."):
+            engine = st.session_state.engine
+            stats = engine.get_detailed_diagnostic()
+            st.session_state.diagnostic_stats = stats
 
-        st.write("**Estado del motor**")
-        st.write(f"- Activos analizados totales: {stats.get('total_assets', 0)}")
-        st.write(f"- Señales encontradas: {stats.get('signals_found', 0)}")
+    if 'diagnostic_stats' in st.session_state:
+        stats = st.session_state.diagnostic_stats
+        if 'error' in stats:
+            st.error(f"Error: {stats['error']}")
+        else:
+            st.write("**Estado del motor**")
+            st.write(f"- Total activos analizados: {stats.get('total_assets', 0)}")
+            st.write(f"- Activos con Score ≥ 0.30: {stats.get('score_ok', 0)}")
+            st.write(f"- Activos con ADX ≥ 20: {stats.get('adx_ok', 0)}")
+            st.write(f"- Activos con KER ≥ 0.45: {stats.get('ker_ok', 0)}")
+            st.write(f"- Activos con Régimen válido: {stats.get('regime_ok', 0)}")
+            st.write(f"- Activos que pasan TODOS los filtros: {stats.get('passes_all', 0)}")
+            st.write(f"- Señales generadas: {stats.get('signals_found', 0)}")
 
-        st.write("**Desglose por mercado**")
-        for market, data in stats.get('by_market', {}).items():
-            st.write(f"- {market.capitalize()}: {data['total']} activos, {data['signals']} señales")
+            if stats.get('passes_all', 0) == 0 and stats.get('signals_found', 0) == 0:
+                st.warning("⚠️ **No hay señales** porque ningún activo cumple todos los filtros de entrada.")
+                st.info("""
+                **Motivo**: El score actual es inferior al mínimo requerido o los filtros de ADX/KER/Régimen no se cumplen.
+                - **Score mínimo requerido**: 0.30
+                - **ADX mínimo**: 20
+                - **KER mínimo**: 0.45
+                - **Régimen**: Tendencia_Fuerte, Tendencia_Débil, Normal o Expansión (excluye 'Chop' e 'Indefinido')
+                """)
+            elif stats.get('passes_all', 0) > 0 and stats.get('signals_found', 0) == 0:
+                st.info("✅ Hay activos que cumplen los filtros, pero no se generaron señales porque el sistema requiere confirmaciones adicionales (ej. tendencia de EMAs, VWAP, etc.) que no se reflejan en el diagnóstico simple.")
 
-        st.write("**Último escaneo**")
-        st.write(f"- {stats.get('timestamp', 'N/A')}")
+            st.write(f"**Último escaneo:** {stats.get('timestamp', 'N/A')}")
+    else:
+        st.info("🔄 Haz clic en 'Actualizar diagnóstico' para ver el estado del sistema.")
 
-        st.write("**Filtros activos**")
-        st.write("""
-        - ADX >= 20
-        - KER >= 0.45
-        - Score >= 0.30
-        - Precio > EMA50 y EMA200 (con tolerancia 2%)
-        - Precio > VWAP (con tolerancia 2%)
-        - Régimen != Chop ni Indefinido
-        """)
+# -----------------------------------------------------------------------------
+# TAB 13 — MARKET RADAR (NUEVO)
+# -----------------------------------------------------------------------------
+with tabs[13]:
+    st.subheader("📊 Market Radar / Ranking de Activos")
 
-        # Historial de señales (si existe)
-        if 'historical_signals' in st.session_state:
-            df_hist = st.session_state.historical_signals
-            st.write(f"**Señales históricas (últimos 7 días)**: {len(df_hist)}")
-            if not df_hist.empty:
-                st.dataframe(df_hist[['symbol', 'market', 'direction', 'result', 'score']].head(5))
+    # Selectores
+    col1, col2, col3 = st.columns([1, 1, 1])
+    with col1:
+        top_n = st.selectbox("Mostrar TOP", [10, 20, 25, 30, "Todos"], index=1)
+    with col2:
+        selected_markets = st.multiselect(
+            "Mercados",
+            ["spot", "margin", "futures"],
+            default=["spot", "margin", "futures"]
+        )
+    with col3:
+        max_assets_input = st.number_input("Límite de activos (0 = sin límite)", min_value=0, value=200, step=50)
 
-        # Top Ten
-        if 'top_assets' in st.session_state and not st.session_state.top_assets.empty:
-            df_top = st.session_state.top_assets
-            st.write(f"**Top Ten generado**: {len(df_top)} activos clasificados")
+    if st.button("🔄 Actualizar ranking", use_container_width=True):
+        with st.spinner("Generando ranking de activos..."):
+            engine = st.session_state.engine
+            max_assets = None if max_assets_input == 0 else max_assets_input
+            df_rank = engine.get_market_ranking(markets=selected_markets, max_assets=max_assets)
+            st.session_state.market_ranking = df_rank
+            st.success(f"Ranking generado: {len(df_rank)} activos")
+
+    # Sección multi-timeframe
+    st.subheader("📈 Diagnóstico Multi-Timezone")
+    if st.button("🔄 Analizar multi-timeframe"):
+        with st.spinner("Analizando múltiples timeframes..."):
+            engine = st.session_state.engine
+            tf_results = engine.get_multi_timeframe_ranking(
+                timeframes=['15m', '1h', '4h', '1d', '3d'],
+                markets=selected_markets,
+                max_assets=100
+            )
+            st.session_state.multi_tf_ranking = tf_results
+
+    if st.session_state.multi_tf_ranking:
+        tf_data = []
+        for tf, data in st.session_state.multi_tf_ranking.items():
+            tf_data.append({
+                'Timeframe': tf,
+                'Total Assets': data['total_assets'],
+                'Avg Score': f"{data['avg_score']:.3f}",
+                'Best Asset': data['best_asset'],
+                'Signals': data['signals']
+            })
+        st.dataframe(pd.DataFrame(tf_data))
+
+    if 'market_ranking' in st.session_state and not st.session_state.market_ranking.empty:
+        df_rank = st.session_state.market_ranking
+
+        # Aplicar filtro TOP N
+        if top_n != "Todos":
+            df_rank = df_rank.head(int(top_n))
+
+        # Mostrar tabla con colores
+        st.dataframe(
+            df_rank[['symbol', 'market', 'price', 'score', 'adx', 'ker', 'regime',
+                     'score_ok', 'adx_ok', 'ker_ok', 'regime_ok', 'passes_all']].style.applymap(
+                lambda x: 'background-color: #d4edda' if x is True else 'background-color: #f8d7da' if x is False else '',
+                subset=['score_ok', 'adx_ok', 'ker_ok', 'regime_ok', 'passes_all']
+            ).format({
+                'price': '{:.4f}',
+                'score': '{:.3f}',
+                'adx': '{:.1f}',
+                'ker': '{:.3f}'
+            })
+        )
+
+        # Resumen de diagnóstico
+        total = len(df_rank)
+        passes_all = df_rank[df_rank['passes_all'] == True].shape[0]
+        score_ok = df_rank[df_rank['score_ok'] == True].shape[0]
+        adx_ok = df_rank[df_rank['adx_ok'] == True].shape[0]
+        ker_ok = df_rank[df_rank['ker_ok'] == True].shape[0]
+        regime_ok = df_rank[df_rank['regime_ok'] == True].shape[0]
+
+        st.markdown("---")
+        st.subheader("📊 Diagnóstico del ranking")
+        col1, col2, col3, col4, col5 = st.columns(5)
+        col1.metric("Total activos", total)
+        col2.metric("Score ≥ 0.30", f"{score_ok} ({score_ok/total*100:.1f}%)")
+        col3.metric("ADX ≥ 20", f"{adx_ok} ({adx_ok/total*100:.1f}%)")
+        col4.metric("KER ≥ 0.45", f"{ker_ok} ({ker_ok/total*100:.1f}%)")
+        col5.metric("Régimen válido", f"{regime_ok} ({regime_ok/total*100:.1f}%)")
+        st.metric("Cumplen todos los filtros", f"{passes_all} ({passes_all/total*100:.1f}%)")
+
+        # Explicación de ausencia de señales
+        if passes_all == 0:
+            st.warning("⚠️ **No hay señales** porque ningún activo cumple todos los filtros de entrada.")
+            st.info("""
+            **Motivo**: El score actual es inferior al mínimo requerido (0.30) o los filtros de ADX/KER/Régimen no se cumplen.
+            - **Score mínimo requerido**: 0.30
+            - **ADX mínimo**: 20
+            - **KER mínimo**: 0.45
+            - **Régimen**: Tendencia_Fuerte, Tendencia_Débil, Normal o Expansión (excluye 'Chop' e 'Indefinido')
+            """)
+        elif passes_all > 0 and st.session_state.signals.get('spot') is None and st.session_state.signals.get('margin') is None and st.session_state.signals.get('futures') is None:
+            st.info("✅ Hay activos que cumplen los filtros, pero no se generaron señales porque el sistema requiere confirmaciones adicionales (ej. tendencia de EMAs, VWAP, etc.) que no se reflejan en este ranking simple.")
+
+        # Mostrar los mejores activos que pasan todos los filtros
+        top_passes = df_rank[df_rank['passes_all'] == True].head(10)
+        if not top_passes.empty:
+            st.subheader("🏆 Top 10 activos que cumplen todos los filtros")
+            st.dataframe(top_passes[['symbol', 'market', 'price', 'score', 'adx', 'ker', 'regime']])
+
+        # Score máximo actual
+        max_score = df_rank['score'].max()
+        st.metric("Score máximo actual", f"{max_score:.3f}")
+        st.caption(f"Se requiere score ≥ 0.30 para considerar entrada. Actualmente el máximo es {max_score:.3f}.")
 
     else:
-        st.info("🔄 Actualiza los datos para ver el diagnóstico completo.")
+        st.info("🔄 Haz clic en 'Actualizar ranking' para obtener el Market Radar.")
