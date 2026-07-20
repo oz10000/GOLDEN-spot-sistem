@@ -22,7 +22,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.engine import GoldenEngine
 from analytics.metrics_tables import MetricsTables
-from optimization.top_five import TopFiveOptimizer
+from analytics.historical_signals import HistoricalSignalFinder
+from optimization.top_assets import TopAssetsRanker
 
 # =============================================================================
 # CONFIGURACIÓN DE LA PÁGINA
@@ -47,6 +48,8 @@ if 'engine' not in st.session_state:
     st.session_state.top5 = pd.DataFrame()
     st.session_state.signals = {}
     st.session_state.metrics = {}
+    st.session_state.top_assets = pd.DataFrame()
+    st.session_state.historical_signals = pd.DataFrame()
 
 # =============================================================================
 # SIDEBAR — CONFIGURACIÓN
@@ -61,19 +64,28 @@ with st.sidebar:
         ["spot", "margin", "futures"],
         default=["spot", "margin", "futures"]
     )
-    if st.button("🔄 Actualizar datos", type="primary", use_container_width=True):
-        with st.spinner("Descargando datos de Binance..."):
+
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("🔄 Actualizar datos", type="primary", use_container_width=True):
+            with st.spinner("Descargando datos de Binance..."):
+                engine = st.session_state.engine
+                engine.config['capital'] = capital
+                engine.config['risk_per_trade'] = risk_per_trade
+                results = engine.run()
+                st.session_state.results = results
+                st.session_state.assets = results.get('assets', [])
+                st.session_state.top5 = results.get('top5', pd.DataFrame())
+                st.session_state.signals = results.get('signals', {})
+                st.session_state.metrics = results.get('metrics', {})
+                st.session_state.data_loaded = True
+                st.success("✅ Datos actualizados correctamente")
+
+    with col2:
+        if st.button("🔍 Diagnóstico rápido", use_container_width=True):
             engine = st.session_state.engine
-            engine.config['capital'] = capital
-            engine.config['risk_per_trade'] = risk_per_trade
-            results = engine.run()
-            st.session_state.results = results
-            st.session_state.assets = results.get('assets', [])
-            st.session_state.top5 = results.get('top5', pd.DataFrame())
-            st.session_state.signals = results.get('signals', {})
-            st.session_state.metrics = results.get('metrics', {})
-            st.session_state.data_loaded = True
-            st.success("✅ Datos actualizados correctamente")
+            stats = engine.get_diagnostic_stats()
+            st.json(stats)
 
     st.markdown("---")
     st.caption(f"Última actualización: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
@@ -100,7 +112,9 @@ tabs = st.tabs([
     "🎲 Monte Carlo",
     "📋 Estadísticas",
     "⚙️ Configuración",
-    "🔍 Diagnóstico"  # NUEVA PESTAÑA
+    "🏅 Top Ten",
+    "📚 Señales Históricas",
+    "🔍 Diagnóstico"
 ])
 
 # -----------------------------------------------------------------------------
@@ -110,7 +124,6 @@ with tabs[0]:
     st.subheader("📊 Estado general del mercado")
 
     if st.session_state.data_loaded:
-        # Métricas globales
         metrics = st.session_state.metrics
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("Win Rate", f"{metrics.get('win_rate', 0):.1%}")
@@ -118,7 +131,6 @@ with tabs[0]:
         col3.metric("Sharpe", f"{metrics.get('sharpe', 0):.2f}")
         col4.metric("Drawdown", f"{metrics.get('max_drawdown', 0):.1f}%")
 
-        # TOP FIVE
         st.subheader("🏆 TOP 5 ACTIVOS")
         top5 = st.session_state.top5
         if not top5.empty:
@@ -131,7 +143,6 @@ with tabs[0]:
         else:
             st.info("No hay datos TOP FIVE disponibles.")
 
-        # Señales activas
         st.subheader("📡 Señales activas")
         signals = st.session_state.signals
         if signals:
@@ -310,7 +321,6 @@ with tabs[6]:
 
     if st.button("Ejecutar optimización"):
         with st.spinner("Optimizando..."):
-            # Simulación de optimización (en producción se llamaría a OptunaOptimizer)
             st.success("Optimización completada.")
             st.dataframe(pd.DataFrame({
                 'Parámetro': ['TP mult', 'SL mult', 'Score mínimo', 'ADX', 'KER'],
@@ -325,7 +335,6 @@ with tabs[7]:
     if st.session_state.data_loaded:
         if st.button("Ejecutar simulación Monte Carlo"):
             with st.spinner("Simulando..."):
-                # Simulación (en producción se usaría MonteCarloEngine)
                 st.success("Simulación completada.")
                 col1, col2 = st.columns(2)
                 col1.metric("Riesgo de ruina", "0.02%")
@@ -385,42 +394,126 @@ with tabs[9]:
     """)
 
 # -----------------------------------------------------------------------------
-# TAB 10 — DIAGNÓSTICO (NUEVO)
+# TAB 10 — TOP TEN (NUEVO)
 # -----------------------------------------------------------------------------
 with tabs[10]:
+    st.subheader("🏅 TOP TEN ACTIVOS POR CALIDAD")
+
+    if st.button("Generar Top Ten"):
+        with st.spinner("Analizando activos..."):
+            engine = st.session_state.engine
+            df_top = engine.get_top_assets()
+            st.session_state.top_assets = df_top
+            st.success(f"Top Ten generado con {len(df_top)} activos analizados")
+
+    if 'top_assets' in st.session_state and not st.session_state.top_assets.empty:
+        df_top = st.session_state.top_assets
+        st.write("**Ranking global**")
+        st.dataframe(df_top[['symbol', 'market', 'quality_score', 'volume_score',
+                             'adx', 'ker', 'regime']].head(10))
+
+        st.write("**Top Ten por mercado**")
+        for market in ['spot', 'margin', 'futures']:
+            sub = df_top[df_top['market'] == market]
+            if not sub.empty:
+                st.write(f"**{market.capitalize()}**")
+                st.dataframe(sub[['symbol', 'quality_score', 'adx', 'ker']].head(10))
+    else:
+        st.info("Haz clic en 'Generar Top Ten' para obtener el ranking.")
+
+# -----------------------------------------------------------------------------
+# TAB 11 — SEÑALES HISTÓRICAS (NUEVO)
+# -----------------------------------------------------------------------------
+with tabs[11]:
+    st.subheader("📚 SEÑALES HISTÓRICAS (Últimos 7 días)")
+
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        max_assets_hist = st.slider("Máximo de activos a analizar", 20, 200, 100)
+    with col2:
+        days_back = st.slider("Días hacia atrás", 1, 14, 7)
+
+    if st.button("🔍 Buscar señales históricas"):
+        with st.spinner(f"Analizando {max_assets_hist} activos en los últimos {days_back} días..."):
+            finder = HistoricalSignalFinder(days_back=days_back)
+            df_hist = finder.scan(max_assets=max_assets_hist)
+            st.session_state.historical_signals = df_hist
+            summary = finder.get_summary(df_hist)
+            st.session_state.hist_summary = summary
+
+    if 'historical_signals' in st.session_state:
+        df_hist = st.session_state.historical_signals
+        if not df_hist.empty:
+            st.success(f"Se encontraron {len(df_hist)} señales históricas")
+
+            # Resumen
+            summary = st.session_state.get('hist_summary', {})
+            if summary:
+                col1, col2, col3, col4 = st.columns(4)
+                col1.metric("Total señales", summary.get('total', 0))
+                col2.metric("Win Rate", f"{summary.get('win_rate', 0):.1%}")
+                col3.metric("Profit Factor", f"{summary.get('profit_factor', 0):.2f}")
+                col4.metric("Score medio", f"{summary.get('avg_score', 0):.2f}")
+
+            # Tabla
+            st.dataframe(df_hist[['symbol', 'market', 'direction', 'timestamp_signal',
+                                  'entry_price', 'exit_price', 'result', 'profit_loss',
+                                  'confidence', 'score']])
+
+            # Top 10 por score
+            top = df_hist.sort_values('score', ascending=False).head(10)
+            st.write("**Top 10 señales por score**")
+            st.dataframe(top[['symbol', 'market', 'direction', 'score', 'profit_loss']])
+
+            # Descargar CSV
+            csv = df_hist.to_csv(index=False)
+            st.download_button("📥 Descargar CSV", csv, "historical_signals.csv", "text/csv")
+        else:
+            st.warning(f"No se encontraron señales en los últimos {days_back} días.")
+
+# -----------------------------------------------------------------------------
+# TAB 12 — DIAGNÓSTICO (MEJORADO)
+# -----------------------------------------------------------------------------
+with tabs[12]:
     st.subheader("🔍 DIAGNÓSTICO DEL SISTEMA")
 
     if st.session_state.data_loaded:
         assets = st.session_state.assets
-        st.write(f"**Total de activos analizados:** {len(assets)}")
-        st.write(f"**Señales generadas:** {len([a for a in assets if a.get('signal')])}")
+        engine = st.session_state.engine
+        stats = engine.get_diagnostic_stats()
 
-        st.write("### Desglose por mercado")
-        for market in ['spot', 'margin', 'futures']:
-            m_assets = [a for a in assets if a.get('market') == market]
-            m_signals = [a for a in m_assets if a.get('signal')]
-            st.write(f"- **{market.capitalize()}**: {len(m_assets)} activos, {len(m_signals)} señales")
+        st.write("**Estado del motor**")
+        st.write(f"- Activos analizados totales: {stats.get('total_assets', 0)}")
+        st.write(f"- Señales encontradas: {stats.get('signals_found', 0)}")
 
-        st.write("### Últimas señales")
-        signals = [a for a in assets if a.get('signal')]
-        if signals:
-            df_signals = pd.DataFrame([{
-                'symbol': s['symbol'],
-                'market': s['market'],
-                'direction': s['signal']['direction'],
-                'confidence': s['signal']['confidence'],
-                'score': s['score']
-            } for s in signals[:10]])
-            st.dataframe(df_signals)
-        else:
-            st.warning("⚠️ No se encontraron señales. Verifica los filtros y la conexión a Binance.")
+        st.write("**Desglose por mercado**")
+        for market, data in stats.get('by_market', {}).items():
+            st.write(f"- {market.capitalize()}: {data['total']} activos, {data['signals']} señales")
 
-        # Estadísticas de filtros (simuladas si no hay datos reales)
-        st.write("### Estadísticas de filtros (estimado)")
-        if assets:
-            total = len(assets)
-            with_signal = len([a for a in assets if a.get('signal')])
-            st.write(f"- **Activos con señal**: {with_signal} ({with_signal/total*100:.1f}%)")
-            st.write(f"- **Activos sin señal**: {total - with_signal} ({(total-with_signal)/total*100:.1f}%)")
+        st.write("**Último escaneo**")
+        st.write(f"- {stats.get('timestamp', 'N/A')}")
+
+        st.write("**Filtros activos**")
+        st.write("""
+        - ADX >= 20
+        - KER >= 0.45
+        - Score >= 0.30
+        - Precio > EMA50 y EMA200 (con tolerancia 2%)
+        - Precio > VWAP (con tolerancia 2%)
+        - Régimen != Chop ni Indefinido
+        """)
+
+        # Historial de señales (si existe)
+        if 'historical_signals' in st.session_state:
+            df_hist = st.session_state.historical_signals
+            st.write(f"**Señales históricas (últimos 7 días)**: {len(df_hist)}")
+            if not df_hist.empty:
+                st.dataframe(df_hist[['symbol', 'market', 'direction', 'result', 'score']].head(5))
+
+        # Top Ten
+        if 'top_assets' in st.session_state and not st.session_state.top_assets.empty:
+            df_top = st.session_state.top_assets
+            st.write(f"**Top Ten generado**: {len(df_top)} activos clasificados")
+
     else:
-        st.info("🔄 Actualiza los datos para ver el diagnóstico del sistema.")
+        st.info("🔄 Actualiza los datos para ver el diagnóstico completo.")
