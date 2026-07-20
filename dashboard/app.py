@@ -99,7 +99,8 @@ tabs = st.tabs([
     "🎯 Optimización",
     "🎲 Monte Carlo",
     "📋 Estadísticas",
-    "⚙️ Configuración"
+    "⚙️ Configuración",
+    "🔍 Diagnóstico"  # NUEVA PESTAÑA
 ])
 
 # -----------------------------------------------------------------------------
@@ -169,7 +170,6 @@ with tabs[1]:
                 'max_drawdown': '{:.1f}%'
             }))
 
-            # Gráfico comparativo
             fig = px.bar(df_spot.head(10), x='symbol', y=['win_rate', 'profit_factor'],
                          title='Top 10 Spot — Win Rate vs Profit Factor',
                          barmode='group')
@@ -252,7 +252,6 @@ with tabs[4]:
                 'score': '{:.3f}'
             }))
 
-            # Descargar CSV
             csv = df_rank.to_csv(index=False)
             st.download_button("📥 Descargar ranking CSV", csv, "ranking.csv", "text/csv")
         else:
@@ -279,7 +278,6 @@ with tabs[5]:
                 col3.metric("Profit Factor", f"{metrics.get('profit_factor', 0):.2f}")
                 col4.metric("Drawdown", f"{metrics.get('max_drawdown', 0):.1f}%")
 
-                # Equity curve
                 equity = metrics.get('equity_curve', [])
                 if equity:
                     fig = go.Figure()
@@ -287,7 +285,6 @@ with tabs[5]:
                     fig.update_layout(title='Curva de capital', xaxis_title='Trade', yaxis_title='Capital (USDT)')
                     st.plotly_chart(fig, use_container_width=True)
 
-                # Últimos trades
                 trades_df = metrics.get('trades_df')
                 if trades_df is not None and not trades_df.empty:
                     st.subheader("Últimos trades")
@@ -348,12 +345,10 @@ with tabs[8]:
     if st.session_state.data_loaded:
         metrics = st.session_state.metrics
         if metrics:
-            # Mostrar todas las métricas en tablas
             st.write("### Métricas globales")
             df_metrics = pd.DataFrame([metrics])
             st.dataframe(df_metrics)
 
-            # Tablas por mercado (si existen)
             tables = MetricsTables.create_all_tables(st.session_state.assets)
             for market, df in tables.items():
                 if not df.empty:
@@ -388,3 +383,44 @@ with tabs[9]:
 
     **Versión del sistema:** 2.0.0
     """)
+
+# -----------------------------------------------------------------------------
+# TAB 10 — DIAGNÓSTICO (NUEVO)
+# -----------------------------------------------------------------------------
+with tabs[10]:
+    st.subheader("🔍 DIAGNÓSTICO DEL SISTEMA")
+
+    if st.session_state.data_loaded:
+        assets = st.session_state.assets
+        st.write(f"**Total de activos analizados:** {len(assets)}")
+        st.write(f"**Señales generadas:** {len([a for a in assets if a.get('signal')])}")
+
+        st.write("### Desglose por mercado")
+        for market in ['spot', 'margin', 'futures']:
+            m_assets = [a for a in assets if a.get('market') == market]
+            m_signals = [a for a in m_assets if a.get('signal')]
+            st.write(f"- **{market.capitalize()}**: {len(m_assets)} activos, {len(m_signals)} señales")
+
+        st.write("### Últimas señales")
+        signals = [a for a in assets if a.get('signal')]
+        if signals:
+            df_signals = pd.DataFrame([{
+                'symbol': s['symbol'],
+                'market': s['market'],
+                'direction': s['signal']['direction'],
+                'confidence': s['signal']['confidence'],
+                'score': s['score']
+            } for s in signals[:10]])
+            st.dataframe(df_signals)
+        else:
+            st.warning("⚠️ No se encontraron señales. Verifica los filtros y la conexión a Binance.")
+
+        # Estadísticas de filtros (simuladas si no hay datos reales)
+        st.write("### Estadísticas de filtros (estimado)")
+        if assets:
+            total = len(assets)
+            with_signal = len([a for a in assets if a.get('signal')])
+            st.write(f"- **Activos con señal**: {with_signal} ({with_signal/total*100:.1f}%)")
+            st.write(f"- **Activos sin señal**: {total - with_signal} ({(total-with_signal)/total*100:.1f}%)")
+    else:
+        st.info("🔄 Actualiza los datos para ver el diagnóstico del sistema.")
