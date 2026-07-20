@@ -1,5 +1,5 @@
 # strategies/spot_strategy.py
-# Estrategia específica para Spot (LONG solamente)
+# Estrategia para Spot (LONG) — CORREGIDA (umbrales más flexibles)
 
 import pandas as pd
 import numpy as np
@@ -13,34 +13,39 @@ class SpotStrategy(BaseStrategy):
         if df is None or len(df) < 60:
             return None
 
-        # 1. Score PiDelta
+        # 1. Score PiDelta (más permisivo)
         score = compute_pidelta_score(df)
-        if score < self.params.get('min_score', 0.35):
+        if score < self.params.get('min_score', 0.30):
             return None
 
-        # 2. Filtros de tendencia
+        # 2. Filtros de tendencia (más flexibles)
         adx_val = self._adx(df).iloc[-1]
         ker_val = self._ker(df['close']).iloc[-1]
-        if adx_val < self.params.get('adx_threshold', 22) or ker_val < self.params.get('ker_threshold', 0.48):
+        if adx_val < self.params.get('adx_threshold', 20) or ker_val < self.params.get('ker_threshold', 0.45):
             return None
 
-        # 3. Régimen
+        # 3. Régimen (permitir Normal y Tendencia Débil)
         regime = classify_regime(df)
         if regime in ['Chop', 'Indefinido']:
             return None
 
         # 4. Solo LONG
         if score < 0:
-            return None  # Spot solo permite LONG
+            return None
 
-        # 5. Confirmación de tendencia
+        # 5. Confirmación de tendencia (más laxa)
         current = df['close'].iloc[-1]
         ema50 = self._ema(df['close'], 50).iloc[-1]
         ema200 = self._ema(df['close'], 200).iloc[-1]
-        if current < ema50 or current < ema200:
+        if current < ema50 * 0.98 or current < ema200 * 0.98:
             return None
 
-        # 6. Entrada
+        # 6. VWAP (tolerancia 2%)
+        vwap_val = vwap(df).iloc[-1]
+        if current < vwap_val * 0.98:
+            return None
+
+        # 7. Entrada
         atr_val = self._atr(df).iloc[-1]
         tp_mult = self.params.get('tp_mult', 2.0)
         sl_mult = self.params.get('sl_mult', 0.8)
@@ -52,7 +57,9 @@ class SpotStrategy(BaseStrategy):
             'sl': current - atr_val * sl_mult,
             'score': score,
             'regime': regime,
-            'confidence': min(1.0, score / 0.5)
+            'confidence': min(1.0, score / 0.4),
+            'leverage': 1.0,
+            'risk': self.params.get('risk_per_trade', 0.02)
         }
 
     def get_risk_params(self) -> Dict:
@@ -71,7 +78,7 @@ class SpotStrategy(BaseStrategy):
             'margin_interest': 0.0
         }
 
-    # Helper methods
+    # Helper methods (sin cambios)
     def _atr(self, df, period=14):
         tr = np.maximum(df['high'] - df['low'],
                         np.maximum(abs(df['high'] - df['close'].shift()),
